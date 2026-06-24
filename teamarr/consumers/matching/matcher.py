@@ -626,6 +626,32 @@ class StreamMatcher:
             )]
 
         outcomes = self._route_to_outcomes(classified, stream_id, target_date)
+
+        # Racing fallback for mixed groups: mirrors the EPG-path fallback in
+        # _match_via_epg. If the primary route found nothing and racing leagues
+        # are present, re-classify with league_event_type="event" to catch
+        # streams like "Practice & Qualifying: Toyota/Save Mart 350" that read
+        # as TEAM_VS_TEAM when team-sport leagues dominate the dominant-type vote.
+        if (
+            not any(o.is_matched for o in outcomes)
+            and classified.category != StreamCategory.RACING_EVENT
+            and any(
+                self._league_event_types.get(lg) == "event"
+                for lg in self._include_leagues
+            )
+        ):
+            racing_classified = classify_stream(
+                stream_name, "event", self._custom_regex,
+                self._feed_home_terms, self._feed_away_terms,
+            )
+            if racing_classified.category == StreamCategory.RACING_EVENT:
+                racing_outcome = self._match_racing_event(
+                    racing_classified, stream_id, target_date
+                )
+                if racing_outcome.is_matched:
+                    outcomes = [racing_outcome]
+                    classified = racing_classified
+
         return [
             self._outcome_to_result(
                 outcome=o,
